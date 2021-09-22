@@ -1131,7 +1131,9 @@ class CyPhyBattleEnv(gym.Env):
             # Execute the defender step if provided
             if self.__defender_agent:
                 self._defender_actuator.on_attacker_step_taken()
-                self.__defender_agent.step(self.__environment, self._defender_actuator, self.__stepcount)
+                voltages = self.__defender_agent.step(self.__environment, self._defender_actuator, self.__stepcount, self)
+                if voltages is not None:
+                    observation['voltage_levels'] = voltages
 
             self.__owned_nodes_indices_cache = None
 

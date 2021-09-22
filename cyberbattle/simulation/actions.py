@@ -23,6 +23,7 @@ from cyberbattle.simulation.cp_model import GridEnv
 from cyberbattle.simulation.cp_model import MachineStatus, PrivilegeLevel, PropertyName, VulnerabilityID, VulnerabilityType
 from . import cp_model as model
 
+
 # from cyberbattle.simulation.model import MachineStatus, PrivilegeLevel, PropertyName, VulnerabilityID, VulnerabilityType
 # from . import model
 
@@ -644,7 +645,6 @@ class DefenderAgentActions:
 
     # Number of steps it takes to completely reimage a node
     REIMAGING_DURATION = 15
-    env = GridEnv
 
     def __init__(self, environment: model.Environment):
         # map nodes being reimaged to the remaining number of steps to completion
@@ -742,12 +742,20 @@ class DefenderAgentActions:
                 service.running = True
 
     # physical side defender action
-    def physical_defense(self, node_id: model.NodeID, action):
-        node_data = self._environment.get_node(node_id)
-        # if node is not compromised control the voltage at this node
-        # write the block of code to implement the phy env interaction
-        if node_data.affect_phy:
-            # get the index of the gen whose set point need to be altered as the defense action
-            data_list = []
-            data_list.append([node_id, '1', action])
-            self.env.phy_env.ChangeParametersMultipleElement('gen', ['BusNum', 'GenID', 'GenVoltSet'], data_list)
+    def physical_defense(self, node_id: model.NodeID, cp_env):
+        data_list = []
+        node_index=0
+        if node_id == 'sA_dnp':
+            node_index = 1
+        elif node_id == 'sB_dnp':
+            node_index = 2
+        elif node_index == 'sC_dnp':
+            node_index = 3
+        else:
+            return []
+        data_list.append([node_index, '1', 1.0])
+        esa_env = cp_env.env.phy_env
+        esa_env.ChangeParametersMultipleElement('gen', ['BusNum', 'GenID', 'GenVoltSet'], data_list)
+        esa_env.SolvePowerFlow()
+        voltages = esa_env.get_power_flow_results('bus').loc[:, 'BusPUVolt'].astype(float)
+        return voltages.values.tolist()

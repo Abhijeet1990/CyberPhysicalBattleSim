@@ -9,7 +9,7 @@ import numpy
 from abc import abstractmethod
 from cyberbattle.simulation.cp_model import Environment
 from cyberbattle.simulation.actions import DefenderAgentActions
-from ..simulation import model
+from ..simulation import cp_model as model
 from cyberbattle.simulation.cp_model import GridEnv
 
 
@@ -41,7 +41,7 @@ class ScanAndReimageCompromisedMachines(DefenderAgent):
         self.scan_capacity = scan_capacity
         self.scan_frequency = scan_frequency
 
-    def step(self, environment: Environment, actions: DefenderAgentActions, t: int):
+    def step(self, environment: Environment, actions: DefenderAgentActions, t: int, cps_environment):
         if t % self.scan_frequency == 0:
             # scan nodes at random
             scanned_nodes = random.choices(list(environment.network.nodes), k=self.scan_capacity)
@@ -56,6 +56,12 @@ class ScanAndReimageCompromisedMachines(DefenderAgent):
                             actions.reimage_node(node_id)
                         else:
                             logging.info(f"Defender detected malware, but node cannot be reimaged {node_id}")
+
+                    # in addition to re-image, also perform physical restoration
+                    if node_info.affect_phy:
+                        voltages = actions.physical_defense(node_id, cps_environment)
+                        return voltages
+
 
 
 class ExternalRandomEvents(DefenderAgent):
@@ -154,12 +160,12 @@ class ExternalRandomEvents(DefenderAgent):
                     node_data.firewall.outgoing.append(rule_to_add)
 
 
-class PhysicalControl(DefenderAgent):
-
-    def step(self, environment: Environment, actions: DefenderAgentActions, val: float):
-        for node_id, node_data in environment.nodes():
-            if node_data.affect_phy:
-                actions.physical_defense(node_id,val)
+# class PhysicalControl(DefenderAgent):
+#
+#     def step(self, environment: Environment, actions: DefenderAgentActions, val: float):
+#         for node_id, node_data in environment.nodes():
+#             if node_data.affect_phy:
+#                 actions.physical_defense(node_id,val)
 
 
 

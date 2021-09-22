@@ -164,6 +164,7 @@ nodes = {
                     cost = 1.0
                 ),
             ),
+        agent_installed=True,
         affect_phy=True
 
     ),
@@ -183,6 +184,7 @@ nodes = {
                     cost = 1.0
                 ),
             ),
+        agent_installed=True,
         affect_phy=True
     ),
     "sC_dnp":m.NodeInfo(
@@ -201,6 +203,7 @@ nodes = {
                     cost = 1.0
                 ),
             ),
+        agent_installed=True,
         affect_phy=True
     ),
     "sA_web":m.NodeInfo(
