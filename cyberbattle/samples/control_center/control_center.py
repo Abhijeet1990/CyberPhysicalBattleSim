@@ -3,7 +3,48 @@
 from cyberbattle.simulation import cp_model as m
 from cyberbattle.simulation.cp_model import NodeID, NodeInfo, VulnerabilityID, VulnerabilityInfo,Identifiers
 from typing import Dict, Iterator, cast, Tuple
+import random
+from esa import SAW
 
+# file path for the power world case
+FilePath = r"D:\CyberBattleSim-main\PWCase\WSCC_9_bus.pwb"
+
+class GridEnv:
+    def __init__(self, train_sets):
+        self.phy_env = SAW(FilePath)
+        self.raw_train_sets = random.sample(train_sets, len(train_sets))
+        self.train_sets = self.raw_train_sets
+        self.last_action = None
+
+    def getState(self):
+        # output = None
+        # scriptcommand = "SolvePowerFlow(RECTNEWT)"
+        # if self.phy_env.runScriptCommand(scriptcommand) == True:
+        #     output = self.phy_env.getPowerFlowResult('bus').loc[:, 'BusPUVolt'].astype(float)
+        #
+        #
+        self.phy_env.SolvePowerFlow()
+        voltages = self.phy_env.get_power_flow_results('bus').loc[:, 'BusPUVolt'].astype(float)
+        return voltages.values.tolist()
+
+    def nextSet(self):
+        output=None
+        action = self.train_sets.pop(0)
+        self.last_action = action
+        self.phy_env.ChangeParametersMultipleElement(action[0], action[1], action[2])
+        try:
+            output = self.getState()
+        except Exception as e:
+            pass
+        return output
+
+    def reset(self):
+        action = self.last_action
+        if action is None:
+            action = self.train_sets.pop(0)
+        output = self.phy_env.ChangeParametersMultipleElement(action[0], action[1], action[2])
+        res = self.nextSet()
+        return res
 
 
 # Network nodes involve in the control center and substation network.

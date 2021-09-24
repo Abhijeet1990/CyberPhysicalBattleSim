@@ -56,7 +56,8 @@ class CyberBattleStateActionModel:
         self.global_features = w.ConcatFeatures(ep, [
             # w.Feature_discovered_node_count(ep),
             # w.Feature_owned_node_count(ep),
-            w.Feature_discovered_notowned_node_count(ep, None)
+            w.Feature_discovered_notowned_node_count(ep, None),
+            w.Feature_voltage_level(ep)
 
             # w.Feature_discovered_ports(ep),
             # w.Feature_discovered_ports_counts(ep),

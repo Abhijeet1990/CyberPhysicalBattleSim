@@ -13,6 +13,8 @@ from ..simulation import commandcontrol, cp_model, actions
 from cyberbattle._env.cp_defender import DefenderAgent
 from .discriminatedunion import DiscriminatedUnion
 from cyberbattle.simulation.cp_model import PortName, PrivilegeLevel
+from ..samples.control_center.control_center import GridEnv
+
 
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -21,16 +23,6 @@ import numpy
 import gym
 from gym import spaces
 from gym.utils import seeding
-
-from esa import SAW
-
-# file path for the power world case
-FilePath = r"D:\CyberBattleSim-main\PWCase\WSCC_9_bus.pwb"
-
-class GridEnv:
-    def __init__(self):
-        self.phy_env = SAW(FilePath)
-
 
 LOGGER = logging.getLogger(__name__)
 
@@ -303,8 +295,8 @@ class CyPhyBattleEnv(gym.Env):
         self.__owned_nodes_indices_cache: Optional[List[int]] = None
         self.__credential_cache: List[cp_model.CachedCredential] = []
         self.__episode_rewards: List[float] = []
-        self.__voltages: List[float] = []
-
+        #self.__voltages: List[float] = self.env.phy_env.get_power_flow_results('bus').loc[:, 'BusPUVolt'].astype(float).values.tolist()
+        self.__voltages: List[float] = self.env.reset()
         # The actuator used to execute actions in the simulation environment
         self._actuator = actions.AgentActions(self.__environment)
         self._defender_actuator = actions.DefenderAgentActions(self.__environment)
@@ -410,6 +402,7 @@ class CyPhyBattleEnv(gym.Env):
     # define the constructor
     def __init__(self,
                  initial_environment: cp_model.Environment,
+                 env: GridEnv,
                  maximum_total_credentials: int = 1000,
                  maximum_node_count: int = 100,
                  maximum_discoverable_credentials_per_action: int = 5,
@@ -462,7 +455,7 @@ class CyPhyBattleEnv(gym.Env):
         self.__node_count = len(initial_environment.network.nodes.items())
 
         # physical simauto object
-        self.env = GridEnv()
+        self.env = env
 
         # The Space object defining the valid actions of an attacker.
         local_vulnerabilities_count = self.__bounds.local_attacks_count

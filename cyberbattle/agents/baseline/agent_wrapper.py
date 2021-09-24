@@ -209,6 +209,29 @@ class Feature_owned_node_count(Feature):
         return [len(owned_nodes_indices)]
 
 
+class Feature_voltage_level(Feature):
+    def __init__(self, p: EnvironmentBounds):
+        self.discrete_voltage_level = 5
+        super().__init__(p, [self.discrete_voltage_level]*9)
+
+    def get(self, a: StateAugmentation, node):
+        voltages = a.observation['voltage_levels']
+        encoded_state = np.zeros(9).tolist()
+        for ix,v in enumerate(voltages):
+            if v > 1.1:
+                encoded_state[ix] = 5
+            elif v > 1.05:
+                encoded_state[ix] = 4
+            elif v > 0.95:
+                encoded_state[ix] = 3
+            elif v > 0.9:
+                encoded_state[ix] = 2
+            else:
+                encoded_state[ix] = 1
+        return encoded_state
+
+
+
 class ConcatFeatures(Feature):
     """ Concatenate a list of features into a single feature
     Parameters:
@@ -337,13 +360,15 @@ class AbstractAction(Feature):
         - local_attack(vulnid)    (source_node provided)
         - remote_attack(vulnid)   (source_node provided, target_node forgotten)
         - connect(port)           (source_node provided, target_node forgotten, credentials infered from cache)
+        - execute                 (target_node..determines at what index the physical device is compromised)
     """
 
     def __init__(self, p: EnvironmentBounds):
         self.n_local_actions = p.local_attacks_count
         self.n_remote_actions = p.remote_attacks_count
         self.n_connect_actions = p.port_count
-        self.n_actions = self.n_local_actions + self.n_remote_actions + self.n_connect_actions
+        self.n_phy_actions = p.phy_count
+        self.n_actions = self.n_local_actions + self.n_remote_actions + self.n_connect_actions + self.n_phy_actions
         super().__init__(p, [self.n_actions])
 
     def specialize_to_gymaction(self, source_node: np.int32, observation, abstract_action_index: np.int32
