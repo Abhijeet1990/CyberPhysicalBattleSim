@@ -42,9 +42,12 @@ class ScanAndReimageCompromisedMachines(DefenderAgent):
         self.scan_frequency = scan_frequency
 
     def step(self, environment: Environment, actions: DefenderAgentActions, t: int, cps_environment):
+        voltages = []
+        patched_nodes = 0
         if t % self.scan_frequency == 0:
             # scan nodes at random
             scanned_nodes = random.choices(list(environment.network.nodes), k=self.scan_capacity)
+            patched_nodes = 0
             for node_id in scanned_nodes:
                 node_info = environment.get_node(node_id)
                 if node_info.status == model.MachineStatus.Running and \
@@ -54,13 +57,14 @@ class ScanAndReimageCompromisedMachines(DefenderAgent):
                         if node_info.reimagable:
                             logging.info(f"Defender detected malware, reimaging node {node_id}")
                             actions.reimage_node(node_id)
+                            patched_nodes += 1
                         else:
                             logging.info(f"Defender detected malware, but node cannot be reimaged {node_id}")
 
                     # in addition to re-image, also perform physical restoration
                     if node_info.affect_phy:
                         voltages = actions.physical_defense(node_id, cps_environment)
-                        return voltages
+        return voltages, patched_nodes
 
 
 

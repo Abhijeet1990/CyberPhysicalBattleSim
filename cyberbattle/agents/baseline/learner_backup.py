@@ -6,12 +6,10 @@ import math
 import sys
 
 from .plotting import PlotTraining, plot_averaged_cummulative_rewards
-from .agent_wrapper import AgentWrapper, EnvironmentBounds, Verbosity, ActionTrackingStateAugmentation, DefenseAgentWrapper,DefenseActionTrackingStateAugmentation
+from .agent_wrapper import AgentWrapper, EnvironmentBounds, Verbosity, ActionTrackingStateAugmentation
 import logging
 import numpy as np
-#from cyberbattle._env import cyberbattle_env
-import numpy as np
-from cyberbattle._env import cyberphysicalbattle_env as cyberbattle_env
+from cyberbattle._env import cyberbattle_env
 from typing import Tuple, Optional, TypedDict, List
 import progressbar
 import abc
@@ -78,9 +76,7 @@ Breakdown = TypedDict('Breakdown', {
     'local': int,
     'remote': int,
     'connect': int,
-    'execute':int,
-    'scan':int,
-    'patch':int
+    'execute':int
 })
 
 Outcomes = TypedDict('Outcomes', {
@@ -95,14 +91,6 @@ Stats = TypedDict('Stats', {
 })
 
 TrainedLearner = TypedDict('TrainedLearner', {
-    'all_episodes_rewards': List[List[float]],
-    'all_episodes_availability': List[List[float]],
-    'learner': Learner,
-    'trained_on': str,
-    'title': str
-})
-
-TrainedDefenseLearner = TypedDict('TrainedDefenseLearner', {
     'all_episodes_rewards': List[List[float]],
     'all_episodes_availability': List[List[float]],
     'learner': Learner,
@@ -126,17 +114,10 @@ def print_stats(stats):
             print(
                 f"    {actiontype}-{kind}: {stats[actiontype]['reward'][kind]}/{stats[actiontype]['noreward'][kind]} "
                 f"({ratio(kind)})")
-
-        if 'scan' in stats['explore']['reward'].keys():
-            print_kind('scan')
-            print_kind('patch')
-        else:
-            print_kind('local')
-            print_kind('remote')
-            print_kind('connect')
-            print_kind('execute')
-        #print_kind('scan')
-        #print_kind('patch')
+        print_kind('local')
+        print_kind('remote')
+        print_kind('connect')
+        print_kind('execute')
 
     print("  Breakdown [Reward/NoReward (Success rate)]")
     print_breakdown(stats, 'explore')
@@ -145,7 +126,7 @@ def print_stats(stats):
 
 
 def epsilon_greedy_search(
-    cyberbattle_gym_env: cyberbattle_env.CyPhyBattleEnv,
+    cyberbattle_gym_env: cyberbattle_env.CyberBattleEnv,
     environment_properties: EnvironmentBounds,
     learner: Learner,
     defense_learner: Learner,
@@ -218,15 +199,9 @@ def epsilon_greedy_search(
 
     all_episodes_rewards = []
     all_episodes_availability = []
-    all_episodes_defense_rewards = []
-    all_episodes_defense_availability = []
 
     wrapped_env = AgentWrapper(cyberbattle_gym_env,
                                ActionTrackingStateAugmentation(environment_properties, cyberbattle_gym_env.reset()))
-
-    # create a wrapped env for the defender
-    defense_wrapped_env =  DefenseAgentWrapper(cyberbattle_gym_env,
-                               DefenseActionTrackingStateAugmentation(environment_properties, cyberbattle_gym_env.reset()))
     steps_done = 0
     plot_title = f"{title} (epochs={episode_count}, ϵ={initial_epsilon}, ϵ_min={epsilon_minimum}," \
         + (f"ϵ_multdecay={epsilon_multdecay}," if epsilon_multdecay else '') \
@@ -246,22 +221,12 @@ def epsilon_greedy_search(
         total_reward = 0.0
         all_rewards = []
         all_availability = []
-        total_reward_defense = 0.0
-        all_rewards_defense = []
-        all_availability_defense = []
         learner.new_episode()
 
         stats = Stats(exploit=Outcomes(reward=Breakdown(local=0, remote=0, connect=0, execute=0),
                                        noreward=Breakdown(local=0, remote=0, connect=0, execute=0)),
                       explore=Outcomes(reward=Breakdown(local=0, remote=0, connect=0, execute=0),
                                        noreward=Breakdown(local=0, remote=0, connect=0, execute=0)),
-                      exploit_deflected_to_explore=0
-                      )
-
-        def_stats = Stats(exploit=Outcomes(reward=Breakdown(scan=0, patch=0, execute=0),
-                                       noreward=Breakdown(scan=0, patch=0, execute=0)),
-                      explore=Outcomes(reward=Breakdown(scan=0, patch=0, execute=0),
-                                       noreward=Breakdown(scan=0, patch=0, execute=0)),
                       exploit_deflected_to_explore=0
                       )
 
@@ -322,36 +287,6 @@ def epsilon_greedy_search(
             total_reward += reward
             bar.update(t, reward=total_reward)
 
-            # add the defense sequential actions here
-            if cyberbattle_gym_env.sequential_defense:
-                print('sequential defense enabled')
-                y = np.random.rand()
-                if y <= epsilon:
-                    action_style, gym_action, action_metadata = defense_learner.explore(defense_wrapped_env,observation)
-                else:
-                    action_style, gym_action, action_metadata = defense_learner.exploit(defense_wrapped_env, observation)
-                    if not gym_action:
-                        def_stats['exploit_deflected_to_explore'] += 1
-                        _, gym_action, action_metadata = defense_learner.explore(defense_wrapped_env,observation)
-
-                # Take the step
-                logging.debug(f"gym_action={gym_action}, action_metadata={action_metadata}")
-                observation, reward, done, info = defense_wrapped_env.step(gym_action,observation)
-
-                action_type = 'exploit' if action_style == 'exploit' else 'explore'
-                outcome = 'reward' if reward > 0 else 'noreward'
-                if 'scan' in gym_action:
-                    def_stats[action_type][outcome]['scan'] += 1
-                elif 'patch' in gym_action:
-                    def_stats[action_type][outcome]['patch'] += 1
-                elif 'execute' in gym_action:
-                    def_stats[action_type][outcome]['execute'] += 1
-
-                defense_learner.on_step(wrapped_env, observation, reward, done, info, action_metadata)
-                all_rewards_defense.append(reward)
-                all_availability_defense.append(info['network_availability'])
-                total_reward_defense += reward
-                #bar.update(t, reward=total_reward)
             if verbosity == Verbosity.Verbose or (verbosity == Verbosity.Normal and reward > 0):
                 sign = ['-', '+'][reward > 0]
 
@@ -368,9 +303,6 @@ def epsilon_greedy_search(
                 render_file_index += 1
 
             learner.end_of_iteration(t, done)
-
-            if cyberbattle_gym_env.sequential_defense:
-                defense_learner.end_of_iteration(t,done)
 
             if done:
                 episode_ended_at = t
@@ -389,32 +321,20 @@ def epsilon_greedy_search(
             print(f"  Episode {i_episode} stopped at t={iteration_count} {loss_string}")
 
         print_stats(stats)
-        print_stats(def_stats)
 
         all_episodes_rewards.append(all_rewards)
         all_episodes_availability.append(all_availability)
 
-        if cyberbattle_gym_env.sequential_defense:
-            all_episodes_defense_rewards.append(all_rewards_defense)
-            all_episodes_defense_availability.append(all_availability_defense)
-
         length = episode_ended_at if episode_ended_at else iteration_count
         learner.end_of_episode(i_episode=i_episode, t=length)
-
-        if cyberbattle_gym_env.sequential_defense:
-            defense_learner.end_of_episode(i_episode=i_episode, t=length)
         plottraining.episode_done(length)
         if render:
             wrapped_env.render()
-            if cyberbattle_gym_env.sequential_defense:
-                defense_wrapped_env.render()
 
         if epsilon_multdecay:
             epsilon = max(epsilon_minimum, epsilon * epsilon_multdecay)
 
     wrapped_env.close()
-    if cyberbattle_gym_env.sequential_defense:
-        defense_wrapped_env.close()
     print("simulation ended")
     plottraining.plot_end()
 
@@ -424,19 +344,13 @@ def epsilon_greedy_search(
         learner=learner,
         trained_on=cyberbattle_gym_env.name,
         title=plot_title
-    ), TrainedDefenseLearner(
-        all_episodes_rewards=all_episodes_defense_rewards,
-        all_episodes_availability=all_episodes_defense_availability,
-        learner=defense_learner,
-        trained_on=cyberbattle_gym_env.name,
-        title=plot_title
     )
 
 
 def transfer_learning_evaluation(
     environment_properties: EnvironmentBounds,
     trained_learner: TrainedLearner,
-    eval_env: cyberbattle_env.CyPhyBattleEnv,
+    eval_env: cyberbattle_env.CyberBattleEnv,
     eval_epsilon: float,
     eval_episode_count: int,
     iteration_count: int,

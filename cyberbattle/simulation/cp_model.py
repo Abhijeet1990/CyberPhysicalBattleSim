@@ -208,6 +208,24 @@ VulnerabilityOutcomes = Union[
     SystemEscalation, CustomerData, LateralMove, ExploitFailed, PhysicalAttack]
 
 
+class DefenseOutcome:
+    """Outcome of defense action"""
+
+class ScanOutcome(DefenseOutcome):
+    """Set of nodes that are successfully Scanned"""
+    def __init__(self, _discovered_nodes):
+        self.discovered_nodes = _discovered_nodes
+
+class PatchOutcome(DefenseOutcome):
+    """This is for situations when a set of nodes are patched """
+    def __init__(self, _patched_nodes):
+        self.patched_nodes = _patched_nodes
+
+class PhysicalDefense(DefenseOutcome):
+    """This is for situations when physical action based defense executed """
+    def __init__(self, _voltages):
+        self.voltages = _voltages
+
 class AttackResult():
     """The result of attempting a specific attack (either local or remote)"""
     success: bool

@@ -52,7 +52,7 @@ parser.add_argument('--rewardplot_with', default=80, type=int,
 
 parser.add_argument('--chain_size', default=4, type=int,
                     help='size of the chain of the CyberBattleChain sample environment')
-parser.add_argument('--with_defender',default= False, type=bool, help='Indicates, if Defender is considered in the environment')
+parser.add_argument('--with_defender',default= True, type=bool, help='Indicates, if Defender is considered in the environment')
 
 parser.add_argument('--random_agent', dest='run_random_agent', action='store_true', help='run the random agent as a baseline for comparison')
 parser.add_argument('--no-random_agent', dest='run_random_agent', action='store_false', help='do not run the random agent as a baseline for comparison')
@@ -80,7 +80,8 @@ if args.with_defender:
                                      defender_agent=ScanAndReimageCompromisedMachines(
                                          probability=0.6,
                                          scan_capacity=2,
-                                         scan_frequency=5)
+                                         scan_frequency=5),
+                                     sequential_defense = True
                                    )
 
 ep = w.EnvironmentBounds.of_identifiers(
@@ -93,10 +94,7 @@ all_runs = []
 
 cyberphysicalbattle.seed(34)
 
-
-if not args.with_defender:
-    # %%
-    dqn_with_defender = learner.epsilon_greedy_search(
+dqn_with_defender = learner.epsilon_greedy_search(
         cyberbattle_gym_env=cyberphysicalbattle,
         environment_properties=ep,
         learner=dqla.DeepQLearnerPolicy(
@@ -124,110 +122,54 @@ if not args.with_defender:
         title="DQL"
     )
 
-    # %%
-    dql_exploit_run = learner.epsilon_greedy_search(
-        cyberphysicalbattle,
-        ep,
-        learner=dqn_with_defender['learner'],
-        defense_learner=dqn_with_defender['defense_learner'],
-        episode_count=args.training_episode_count,
-        iteration_count=args.iteration_count,
-        epsilon=0.0,  # 0.35,
-        render=False,
-        # render_last_episode_rewards_to='images/chain10',
-        verbosity=Verbosity.Quiet,
-        title="Exploiting DQL"
-    )
+# %%
+dql_exploit_run = learner.epsilon_greedy_search(
+    cyberphysicalbattle,
+    ep,
+    learner=dqn_with_defender['learner'],
+    defense_learner=dqn_with_defender['defense_learner'],
+    episode_count=args.training_episode_count,
+    iteration_count=args.iteration_count,
+    epsilon=0.0,  # 0.35,
+    render=False,
+    # render_last_episode_rewards_to='images/chain10',
+    verbosity=Verbosity.Quiet,
+    title="Exploiting DQL"
+)
 
-    # %%
-    credlookup_run = learner.epsilon_greedy_search(
-        cyberphysicalbattle,
-        ep,
-        learner=rca.CredentialCacheExploiter(),
-        defense_learner=dqn_with_defender['defense_learner'],
-        episode_count=10,
-        iteration_count=args.iteration_count,
-        epsilon=0.90,
-        render=False,
-        epsilon_exponential_decay=10000,
-        epsilon_minimum=0.10,
-        verbosity=Verbosity.Quiet,
-        title="Credential lookups (ϵ-greedy)"
-    )
+# %%
+credlookup_run = learner.epsilon_greedy_search(
+    cyberphysicalbattle,
+    ep,
+    learner=rca.CredentialCacheExploiter(),
+    defense_learner=dqn_with_defender['defense_learner'],
+    episode_count=10,
+    iteration_count=args.iteration_count,
+    epsilon=0.90,
+    render=False,
+    epsilon_exponential_decay=10000,
+    epsilon_minimum=0.10,
+    verbosity=Verbosity.Quiet,
+    title="Credential lookups (ϵ-greedy)"
+)
 
-    # %%
-    # Plots
-    all_runs = [
-        credlookup_run,
-        dqn_with_defender,
-        dql_exploit_run
-    ]
-    p.plot_averaged_cummulative_rewards(
-        all_runs=all_runs,
-        #title=f'Attacker agents vs Basic Defender -- rewards\n env={cyberphysicalbattle.name}, episodes={args.training_episode_count}'
-        title = f'Attacker agents -- rewards\n env={cyberphysicalbattle.name}, episodes={args.training_episode_count}'
-    )
+# %%
+# Plots
+all_runs = [
+    credlookup_run,
+    dqn_with_defender,
+    dql_exploit_run
+]
+p.plot_averaged_cummulative_rewards(
+    all_runs=all_runs,
+    #title=f'Attacker agents vs Basic Defender -- rewards\n env={cyberphysicalbattle.name}, episodes={args.training_episode_count}'
+    title = f'Attacker agents -- rewards\n env={cyberphysicalbattle.name}, episodes={args.training_episode_count}'
+)
 
-    # p.plot_episodes_length(all_runs)
-    p.plot_averaged_availability(
-        #title=f"Attacker agents vs Basic Defender -- availability\n env={cyberphysicalbattle.name}, episodes={args.training_episode_count}",
-        title=f"Attacker agents -- availability\n env={cyberphysicalbattle.name}, episodes={args.training_episode_count}",
-        all_runs=all_runs)
+# p.plot_episodes_length(all_runs)
+p.plot_averaged_availability(
+    #title=f"Attacker agents vs Basic Defender -- availability\n env={cyberphysicalbattle.name}, episodes={args.training_episode_count}",
+    title=f"Attacker agents -- availability\n env={cyberphysicalbattle.name}, episodes={args.training_episode_count}",
+    all_runs=all_runs)
 
-else:
 
-    # Run Deep Q-learning
-    dqn_learning_run = learner.epsilon_greedy_search(
-        cyberbattle_gym_env=cyberphysicalbattle,
-        environment_properties=ep,
-        learner=dqla.DeepQLearnerPolicy(
-            ep=ep,
-            gamma=0.015,
-            replay_memory_size=10000,
-            target_update=10,
-            batch_size=512,
-            learning_rate=0.01),  # torch default is 1e-2
-        episode_count=args.training_episode_count,
-        defense_learner=defense_dqla.DeepQLearnerDefenderPolicy(
-            ep=ep,
-            gamma=0.015,
-            replay_memory_size=10000,
-            target_update=10,
-            batch_size=512,
-            learning_rate=0.01,
-            env=cyberphysicalbattle),  # torch default is 1e-2
-        iteration_count=args.iteration_count,
-        epsilon=0.90,
-        render=False,
-        # epsilon_multdecay=0.75,  # 0.999,
-        epsilon_exponential_decay=5000,  # 10000
-        epsilon_minimum=0.10,
-        verbosity=Verbosity.Quiet,
-        title="DQL"
-    )
-
-    all_runs.append(dqn_learning_run)
-
-    if args.run_random_agent:
-        random_run = learner.epsilon_greedy_search(
-            cyberphysicalbattle,
-            ep,
-            learner=learner.RandomPolicy(),
-            defense_learner=learner.RandomPolicy(),
-            episode_count=args.eval_episode_count,
-            iteration_count=args.iteration_count,
-            epsilon=1.0,  # purely random
-            render=False,
-            verbosity=Verbosity.Quiet,
-            title="Random search"
-        )
-        all_runs.append(random_run)
-
-    colors = [asciichartpy.red, asciichartpy.green, asciichartpy.yellow, asciichartpy.blue]
-
-    print("Episode duration -- DQN=Red, Random=Green")
-    print(asciichartpy.plot(p.episodes_lengths_for_all_runs(all_runs), {'height': 30, 'colors': colors}))
-
-    print("Cumulative rewards -- DQN=Red, Random=Green")
-    c = p.averaged_cummulative_rewards(all_runs, args.rewardplot_with)
-    print(asciichartpy.plot(c, {'height': 10, 'colors': colors}))

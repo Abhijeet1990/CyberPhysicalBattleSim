@@ -91,6 +91,10 @@ class ActionResult(NamedTuple):
     reward: Reward
     outcome: Optional[model.VulnerabilityOutcome]
 
+class DefenseActionResult(NamedTuple):
+    """Result from executing an action"""
+    reward: Reward
+    outcome: Optional[model.DefenseOutcome]
 
 ALGEBRA = boolean.BooleanAlgebra()
 
@@ -603,7 +607,6 @@ class AgentActions:
         """Pretty print list of all possible attacks from all the nodes currently owned by the attacker"""
         d.display(pd.DataFrame.from_dict(self.list_all_attacks()))  # type: ignore
 
-
     # this function would be utilized to modify the physical parameters
     def perform_phy_attack(self, node_index, value, env) -> ActionResult:
         command_list = []
@@ -741,6 +744,18 @@ class DefenderAgentActions:
             if service.name == port_name:
                 service.running = True
 
+    def __process_defense_outcome(self, var, action_type)-> Tuple[bool, DefenseActionResult]:
+        print('Implement the process outcome for the defense action')
+        if action_type == 'scan':
+            return True, DefenseActionResult(reward=len(var), outcome=model.ScanOutcome(len(var)))
+        if action_type == 'patch':
+            return True, DefenseActionResult(reward=len(var), outcome=model.PatchOutcome(len(var)))
+        if action_type == 'execute':
+            rew = 0
+            for voltage in var:
+                rew += (1.0 - voltage)**2
+            return True, DefenseActionResult(reward=rew, outcome=model.PhysicalDefense(var))
+
     # physical side defender action
     def physical_defense(self, node_id: model.NodeID, cp_env):
         data_list = []
@@ -759,3 +774,45 @@ class DefenderAgentActions:
         esa_env.SolvePowerFlow()
         voltages = esa_env.get_power_flow_results('bus').loc[:, 'BusPUVolt'].astype(float)
         return voltages.values.tolist()
+
+    def scan_compromised_nodes(self, obs):
+        print('Scanning All the nodes to detect compromise')
+        discovered_nodes=[]
+        graph = self._environment.network
+        for node in graph.nodes:
+            if node in obs['discovered_nodes']:
+                discovered_nodes.append(node)
+        succeeded,result = self.__process_defense_outcome(discovered_nodes,'scan')
+        return result
+
+    def patch_compromised_nodes(self, obs):
+        print('Patching a set of compromised nodes')
+        discovered_nodes = []
+        graph = self._environment.network
+        for node in graph.nodes:
+            if node in obs['discovered_nodes']:
+                discovered_nodes.append(node)
+        succeeded, result = self.__process_defense_outcome(discovered_nodes, 'patch')
+        return result
+
+    # physical side defender action for sequential defense
+    def physical_defense_sequential(self, node_id: model.NodeID, cp_env):
+        data_list = []
+        node_index = 0
+        if node_id == 'sA_dnp':
+            node_index = 1
+        elif node_id == 'sB_dnp':
+            node_index = 2
+        elif node_index == 'sC_dnp':
+            node_index = 3
+        else:
+            return []
+        data_list.append([node_index, '1', 1.0])
+        esa_env = cp_env.env.phy_env
+        esa_env.ChangeParametersMultipleElement('gen', ['BusNum', 'GenID', 'GenVoltSet'], data_list)
+        esa_env.SolvePowerFlow()
+        voltages = esa_env.get_power_flow_results('bus').loc[:, 'BusPUVolt'].astype(float)
+        succeeded, result = self.__process_defense_outcome(voltages.values.tolist(), 'execute')
+        return result
+
+

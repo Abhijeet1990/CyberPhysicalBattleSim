@@ -76,29 +76,6 @@ ActionMask = TypedDict(
                    'execute': numpy.ndarray
                    })
 
-DefenseActionSpaceDict = TypedDict(
-    'DefenseActionSpaceDict', {'scan': spaces.Space,  # type: ignore
-                        'patch': spaces.Space,  # type: ignore
-                        'execute': spaces.Space   # type: ignore
-                        })
-
-
-# The type of a sample from the Action space
-DefenseAction = TypedDict(
-    'DefenseAction', {'scan': numpy.ndarray,
-               # adding the generic type causes runtime
-               # TypeError `'type' object is not subscriptable'`
-               'patch': numpy.ndarray,
-               'execute': numpy.ndarray
-               }, total=False)
-
-# Type of a sample from the ActionMask space
-DefenseActionMask = TypedDict(
-    'DefenseActionMask', {'scan': numpy.ndarray,
-                   'patch': numpy.ndarray,
-                   'execute': numpy.ndarray
-                   })
-
 # Type of a sample from the Observation space
 Observation = TypedDict(
     'Observation', {
@@ -129,9 +106,6 @@ Observation = TypedDict(
 
         # bitmask indicating which action are valid in the current state
         'action_mask': ActionMask,
-
-        # bitmask indicating which action are valid in the current state
-        'defense_action_mask': DefenseActionMask,
 
         # ---------------------------------------------------------
         # State information aggregated over all actions executed so far
@@ -178,9 +152,7 @@ Observation = TypedDict(
         'voltage_levels': List[float], # currently thinking from 9 bus system case
 
         # another state information used for defense operation, number of currently patched nodes
-        'patched_nodes': int,
-
-        'scanned_nodes':int
+        'patched_nodes': int
     })
 
 class DummySpace(spaces.Space):
@@ -206,15 +178,6 @@ def sourcenode_of_action(x: Action) -> int:
 
     assert 'connect' in x
     return x['connect'][0]
-
-def sourcenode_of_defense_action(x: DefenseAction) -> int:
-    """Return the source node of a given action"""
-    if 'scan' in x:
-        return x['scan'][0]
-    elif 'patch' in x:
-        return x['patch'][0]
-    elif 'execute' in x:
-        return x['execute'][0]
 
 
 class EnvironmentBounds(NamedTuple):
@@ -346,7 +309,6 @@ class CyPhyBattleEnv(gym.Env):
         self._defender_actuator = actions.DefenderAgentActions(self.__environment)
 
         self.__patched_nodes = 0
-        self.__scanned_nodes = 0
         self.__stepcount = 0
         self.__start_time = time.time()
         self.__done = False
@@ -458,8 +420,7 @@ class CyPhyBattleEnv(gym.Env):
                  defender_constraint=DefenderConstraint(maintain_sla=0.0),
                  winning_reward=5000.0,
                  losing_reward=0.0,
-                 renderer='',
-                 sequential_defense: bool = False
+                 renderer=''
                  ):
         """Arguments
         ===========
@@ -482,7 +443,6 @@ class CyPhyBattleEnv(gym.Env):
             maximum_discoverable_credentials_per_action=maximum_discoverable_credentials_per_action,
             identifiers=initial_environment.identifiers)
 
-        self.sequential_defense = sequential_defense
         self.validate_environment(initial_environment)
         self.__attacker_goal: Optional[AttackerGoal] = attacker_goal
         self.__defender_goal: DefenderGoal = defender_goal
@@ -504,7 +464,6 @@ class CyPhyBattleEnv(gym.Env):
 
         # physical simauto object
         self.env = env
-
 
         # The Space object defining the valid actions of an attacker.
         local_vulnerabilities_count = self.__bounds.local_attacks_count
@@ -541,27 +500,6 @@ class CyPhyBattleEnv(gym.Env):
                 spaces.MultiBinary(3*phy_count)
         }
 
-        defense_action_spaces: ActionSpaceDict = {
-            "scan": spaces.MultiDiscrete(
-                # source_node_id, vulnerability_id
-                [maximum_node_count]),
-            "patch": spaces.MultiDiscrete(
-                # source_node_id, target_node_id, vulnerability_id
-                [maximum_node_count]),
-            "execute": spaces.Box(numpy.array([-1.0, -1.0, -1.0]), numpy.array([1.1, 1.1, 1.1]), dtype=numpy.float32)
-        }
-
-        self.defense_action_space = DiscriminatedUnion(cast(dict, defense_action_spaces))  # type: ignore
-
-        defense_action_mask_spaces: DefenseActionSpaceDict = {
-            "scan":
-                spaces.MultiBinary(maximum_node_count),
-            "patch":
-                spaces.MultiBinary(maximum_node_count),
-            "execute":
-                spaces.MultiBinary(3 * phy_count)
-        }
-
         # The observation space returning the outcome of each possible action
         self.observation_space = spaces.Dict({
             # how many new nodes were discovered
@@ -596,8 +534,6 @@ class CyPhyBattleEnv(gym.Env):
             # For instance it is a valid action to attempt to connect to a remote node with incorrect credentials,
             # even though such action would 'fail' and potentially yield a negative reward.
             "action_mask": spaces.Dict(action_mask_spaces),
-
-            "defense_action_mask": spaces.Dict(defense_action_mask_spaces),
 
             # size of the credential stack
             'credential_cache_length': spaces.Discrete(maximum_total_credentials),
@@ -638,9 +574,7 @@ class CyPhyBattleEnv(gym.Env):
             # will add other attributes on physical side..
             'voltage_levels': spaces.Box(low=0.0, high=2.0, shape=(9,), dtype=numpy.float32),
 
-            'patched_nodes': spaces.Discrete(maximum_node_count),
-
-            'scanned_nodes': spaces.Discrete(maximum_node_count)
+            'patched_nodes': spaces.Discrete(maximum_node_count)
         })
 
         # reward_range: A tuple corresponding to the min and max possible rewards
@@ -702,17 +636,6 @@ class CyPhyBattleEnv(gym.Env):
         is permitted."""
         if mask is None:
             mask = self.compute_action_mask()
-        field_name = DiscriminatedUnion.kind(action)
-        field_mask, coordinates = mask[field_name], action[field_name]  # type: ignore
-        #print(field_mask)
-        #print(tuple(coordinates))
-        return bool(field_mask[tuple(coordinates)])
-
-    def apply_defense_mask(self, action: DefenseAction, mask: Optional[DefenseActionMask] = None) -> bool:
-        """Apply the action mask to a specific action. Returns true just if the action
-        is permitted."""
-        if mask is None:
-            mask = self.compute_defense_action_mask()
         field_name = DiscriminatedUnion.kind(action)
         field_mask, coordinates = mask[field_name], action[field_name]  # type: ignore
         #print(field_mask)
@@ -851,86 +774,6 @@ class CyPhyBattleEnv(gym.Env):
         raise ValueError("Invalid discriminated union value: " + str(action))
 
 
-    # set of equivalent function for defense actions
-    def apply_defense_mask(self, action: DefenseAction, mask: Optional[DefenseActionMask] = None) -> bool:
-        """Apply the defense action mask to a specific action. Returns true just if the action
-        is permitted."""
-        if mask is None:
-            mask = self.compute_defense_action_mask()
-        field_name = DiscriminatedUnion.kind(action)
-        field_mask, coordinates = mask[field_name], action[field_name]  # type: ignore
-        # print(field_mask)
-        # print(tuple(coordinates))
-        return bool(field_mask[tuple(coordinates)])
-
-    def __get_blank_defense_action_mask(self) -> DefenseActionMask:
-        """Return a blank defense action mask"""
-        node_count = self.__node_count
-        phy_count = self.__bounds.phy_count
-
-        scan = numpy.zeros(
-            shape=(node_count), dtype=numpy.int32)
-        patch = numpy.zeros(
-            shape=(node_count), dtype=numpy.int32)
-        execute = numpy.zeros(
-            shape=(3 * phy_count), dtype=numpy.int32)
-        return DefenseActionMask(
-            scan=scan,
-            patch=patch,
-            execute=execute
-        )
-
-    def __update_defense_action_mask(self, bitmask: DefenseActionMask) -> None:
-        """Update an action mask based on the current state"""
-
-        # compute the defense action bitmask
-        # depending on the state decide what are the feasible actions for the defender agent.
-        count = 0
-        nodes=[]
-        for a,b in self.__environment.nodes():
-            nodes.append(a)
-        for scanned_node,node_data in self.__environment.nodes():
-            # assume all the nodes are scanable
-            ix = nodes.index(scanned_node)
-            bitmask['scan'][ix] = 1
-            # nodes that can be scanned can only be patched if not owned by the attacker
-            if ix in self.__discovered_nodes:
-                bitmask['patch'][ix] = 1
-            if ix in self.__discovered_nodes and node_data.affect_phy:
-                bitmask["execute"][count] = 1
-                count += 1
-
-    def compute_defense_action_mask(self) -> DefenseActionMask:
-        """Compute the action mask for the current state"""
-        bitmask = self.__get_blank_defense_action_mask()
-        self.__update_defense_action_mask(bitmask)
-        # if 'execute' in bitmask:
-        #     if 1 in bitmask['execute']:
-        #         print('found')
-        return bitmask
-
-    def __execute_defense_action(self, action: DefenseAction, obs) -> actions.DefenseActionResult:
-        # Assert that the specified action is consistent (i.e., defining a single action type)
-        assert 1 == len(action.keys())
-
-        assert DiscriminatedUnion.kind(action) != ''
-
-        if "scan" in action:
-            #source_node_index = action['scan']
-            result = self._defender_actuator.scan_compromised_nodes(obs)
-            return result
-        elif "patch" in action:
-            result = self._defender_actuator.patch_compromised_nodes(obs)
-            return result
-        elif "execute" in action:
-            target_node = action['execute'][0]
-            result = self._defender_actuator.physical_defense_sequential(target_node,self)
-            return result
-        else:
-            return None
-
-        raise ValueError("Invalid discriminated union value: " + str(action))
-
     def __get_blank_observation(self) -> Observation:
         observation = Observation(
             newly_discovered_nodes_count=numpy.int32(0),
@@ -941,7 +784,6 @@ class CyPhyBattleEnv(gym.Env):
             customer_data_found=numpy.int32(0),
             escalation=numpy.int32(PrivilegeLevel.NoAccess),
             action_mask=self.__get_blank_action_mask(),
-            defense_action_mask=self.__get_blank_defense_action_mask(),
             probe_result=numpy.int32(0),
             credential_cache_matrix=numpy.zeros((1, 2)),
             credential_cache_length=len(self.__credential_cache),
@@ -956,8 +798,7 @@ class CyPhyBattleEnv(gym.Env):
             discovered_nodes=self.__discovered_nodes,
             explored_network=self.__get_explored_network(),
             voltage_levels=self.__voltages,
-            patched_nodes=self.__patched_nodes,
-            scanned_nodes= self.__scanned_nodes
+            patched_nodes=self.__patched_nodes
         )
 
         return observation
@@ -1080,23 +921,6 @@ class CyPhyBattleEnv(gym.Env):
         self.__update_action_mask(obs['action_mask'])
         return obs, result.reward
 
-    def __observation_reward_from_defense_action_result(self, result: actions.DefenseActionResult, obs) -> Tuple[Observation, float]:
-        outcome = result.outcome
-
-        if isinstance(outcome, cp_model.ScanOutcome):
-            print('Update the observation space depending on scan action')
-        elif isinstance(outcome, cp_model.PatchOutcome):
-            print('Update the observation space depending on patch action')
-            obs['patched_nodes'] = outcome.patched_nodes
-        elif isinstance(outcome,cp_model.PhysicalDefense):
-            print('Update the observation space depending on phy defense action')
-            obs['voltages'] = outcome.voltages
-        else:
-            print('Do nothing')
-
-        self.__update_defense_action_mask(obs['defense_action_mask'])
-        return obs, result.reward
-
     def sample_connect_action_in_expected_range(self) -> Action:
         """Sample an action of type 'connect' where the parameters
         are in the the expected ranges but not necessarily verifying
@@ -1158,34 +982,6 @@ class CyPhyBattleEnv(gym.Env):
 
         return action
 
-    def sample_defense_action_in_range(self, kinds: Optional[List[int]] = None) -> DefenseAction:
-        """Sample an action in the expected component ranges but
-        not necessarily verifying inter-component constraints.
-        (e.g., may return a local_vulnerability action that is not
-        supported by the node)
-
-        - kinds -- A list of elements in {0,1,2} indicating what kind of
-        action to sample (0:local, 1:remote, 2:connect)
-        """
-        np_random = self.defense_action_space.np_random
-
-        if kinds is None:
-            kinds = [0, 1, 2]
-
-        assert kinds, 'Kinds list cannot be empty'
-
-        kind = np_random.choice(kinds)
-
-        if kind == 0:
-            action = DefenseAction(scan=numpy.array([np_random.choice(self.__get__owned_nodes_indices())], numpy.int32))
-        elif kind == 1:
-            action = DefenseAction(patch=numpy.array([np_random.choice(self.__get__owned_nodes_indices())], numpy.int32))
-        else: # this is for attacking the physical nodes
-            action = DefenseAction(execute=numpy.array([np_random.randint(3)], numpy.int32))
-
-        return action
-
-
     def is_node_owned(self, node: int):
         """Return true if a discovered node (specified by its external node index)
         is owned by the attacker agent"""
@@ -1230,14 +1026,6 @@ class CyPhyBattleEnv(gym.Env):
         action = self.sample_action_in_range(kinds)
         while not self.apply_mask(action, action_mask):
             action = self.sample_action_in_range(kinds)
-        return action
-
-    def sample_valid_defense_action(self, kinds=None) -> DefenseAction:
-        """Sample an action within the expected ranges until getting a valid one"""
-        action_mask = self.compute_defense_action_mask()
-        action = self.sample_defense_action_in_range(kinds)
-        while not self.apply_defense_mask(action, action_mask):
-            action = self.sample_defense_action_in_range(kinds)
         return action
 
 
@@ -1334,15 +1122,7 @@ class CyPhyBattleEnv(gym.Env):
         return numpy.block([convert_matrix.to_numpy_array(observation['explored_network'], weight='kind_as_float'),
                             observation['discovered_nodes_properties']])
 
-    def step(self, action, actionType, obs:Observation = None) -> Tuple[Observation, float, bool, StepInfo]:
-        if actionType=='defender':
-            return self.step_defender(action,obs)
-        else:
-            return self.step_attacker(action)
-
-
-# have got to make a separate step function for sequential defense
-    def step_attacker(self, action: Action) -> Tuple[Observation, float, bool, StepInfo]:
+    def step(self, action: Action) -> Tuple[Observation, float, bool, StepInfo]:
         if self.__done:
             raise RuntimeError("new episode must be started with env.reset()")
 
@@ -1353,7 +1133,7 @@ class CyPhyBattleEnv(gym.Env):
             observation, reward = self.__observation_reward_from_action_result(result)
 
             # Execute the defender step if provided.. the current defender actions are not trained using RL
-            if self.__defender_agent and not self.sequential_defense:
+            if self.__defender_agent:
                 self._defender_actuator.on_attacker_step_taken()
                 voltages, patched_nodes = self.__defender_agent.step(self.__environment, self._defender_actuator, self.__stepcount, self)
                 if voltages is not None or len(voltages) > 0:
@@ -1361,13 +1141,7 @@ class CyPhyBattleEnv(gym.Env):
                 if patched_nodes > 0:
                     observation['patched_nodes'] = patched_nodes
 
-            # define a separate reward model for defense
-            # if self.__defender_agent and self.sequential_defense:
-            #     # and isinstance(action,DefenseAction):
-            #     # got to implement the outcome of the defense action
-            #     result = self.__execute_defense_action(action)
-            #     if result is not None:
-            #         observation, defense_result = self.__observation_reward_from_defense_action_result(result)
+                # define a separate reward model for defense
 
             self.__owned_nodes_indices_cache = None
 
@@ -1394,53 +1168,11 @@ class CyPhyBattleEnv(gym.Env):
 
         return observation, reward, self.__done, info
 
-
-    def step_defender(self, action:DefenseAction,obs:Observation) -> Tuple[Observation, float, bool, StepInfo]:
-        if self.__done:
-            raise RuntimeError("new episode must be started with env.reset()")
-
-        self.__stepcount += 1
-        duration = time.time() - self.__start_time
-        defense_result=0
-        try:
-            if self.__defender_agent and self.sequential_defense:
-                # got to implement the outcome of the defense action
-                result = self.__execute_defense_action(action, obs)
-                if result is not None:
-                    observation, defense_result = self.__observation_reward_from_defense_action_result(result, obs)
-
-
-            self.__owned_nodes_indices_cache = None
-
-            if self.__attacker_goal_reached() or self.__defender_constraints_broken():
-                self.__done = True
-                reward = self.__WINNING_REWARD
-            elif self.__defender_goal_reached():
-                self.__done = True
-                reward = self.__LOSING_REWARD
-            else:
-                reward = max(0., defense_result)
-
-        except OutOfBoundIndex as error:
-            logging.warning('Invalid entity index: ' + error.__str__())
-            observation = self.__get_blank_observation()
-            reward = 0.
-
-        info = StepInfo(
-            description='CyberPhysicalBattle simulation',
-            duration_in_ms=duration,
-            step_count=self.__stepcount,
-            network_availability=self._defender_actuator.network_availability)
-        self.__episode_rewards.append(reward)
-
-        return observation, reward, self.__done, info
-
     def reset(self) -> Observation:
         LOGGER.info("Resetting the CyberPhysicalBattle environment")
         self.__reset_environment()
         observation = self.__get_blank_observation()
         observation['action_mask'] = self.compute_action_mask()
-        observation['defense_action_mask'] = self.compute_defense_action_mask()
         observation['discovered_nodes_properties'] = self.__get_property_matrix()
         observation['nodes_privilegelevel'] = self.__get_privilegelevel_array()
         self.__owned_nodes_indices_cache = None

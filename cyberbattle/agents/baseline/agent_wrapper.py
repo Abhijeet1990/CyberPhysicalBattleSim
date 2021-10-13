@@ -12,7 +12,8 @@ from gym import spaces, Wrapper
 from numpy import ndarray
 import cyberbattle._env.cyberphysicalbattle_env as cyberbattle_env
 import logging
-
+import random
+from cyberbattle.simulation.cp_model import Environment
 
 class StateAugmentation:
     """Default agent state augmentation, consisting of the gym environment
@@ -218,18 +219,26 @@ class Feature_voltage_level(Feature):
         voltages = a.observation['voltage_levels']
         encoded_state = np.zeros(9).tolist()
         for ix,v in enumerate(voltages):
-            if v > 1.1:
+            if v > 1.05:
                 encoded_state[ix] = 5
-            elif v > 1.05:
+            elif v > 1.025:
                 encoded_state[ix] = 4
-            elif v > 0.95:
+            elif v > 0.975:
                 encoded_state[ix] = 3
-            elif v > 0.9:
+            elif v > 0.95:
                 encoded_state[ix] = 2
             else:
                 encoded_state[ix] = 1
         return encoded_state
 
+
+class Feature_patched_nodes(Feature):
+    def __init__(self, p: EnvironmentBounds):
+        super().__init__(p, [p.maximum_node_count + 1])
+
+    def get(self, a: StateAugmentation, node):
+        patched_nodes = a.observation['patched_nodes']
+        return [patched_nodes]
 
 
 class ConcatFeatures(Feature):
@@ -444,6 +453,52 @@ class AbstractAction(Feature):
         return np.int32(a)
 
 
+class AbstractDefenseAction(Feature):
+    """An abstraction of the gym state space that reduces
+    the space dimension for learning use to just
+        scan nodes
+        patch nodes
+        physical action
+    """
+
+    def __init__(self, p: EnvironmentBounds):
+        self.n_patches = p.patch_count
+        self.n_scans = p.scan_count
+        self.n_phy_defense = p.phy_count
+        self.n_actions = self.n_patches + self.n_scans + self.n_phy_defense
+        super().__init__(p, [self.n_actions])
+
+    def specialize_to_gymaction(self, environment: Environment, observation, abstract_action_index: np.int32
+                                ) -> Optional[cyberbattle_env.Action]:
+        """Specialize an abstract "q"-action into a gym action.
+        Return an adjustement weight (1.0 if the choice was deterministic, 1/n if a choice was made out of n)
+        and the gym action"""
+
+        scanned_nodes = random.choices(list(environment.environment.network.nodes), k=4)
+        patched_ix =[]
+        if observation['discovered_node_count'] > 0:
+            # array of nodes to patch
+            patched_nodes = random.choices(list(scanned_nodes), k=2)
+            for i in patched_nodes:
+                patched_ix.append(list(environment.environment.network.nodes).index(i))
+            return {'patch': np.array([patched_ix], dtype=np.int32)}
+
+
+    def abstract_from_gymaction(self, gym_action: cyberbattle_env.Action) -> np.int32:
+        """Abstract a gym action into an action to be index in the Q-matrix"""
+        if 'patch' in gym_action:
+            return gym_action['patch'][0]
+        elif 'scan' in gym_action:
+            r = gym_action['scan']
+            return r[0]
+        elif 'execute' in gym_action:
+            return gym_action['execute'][0]
+
+        a = self.n_patches + self.n_scans + self.n_phy_defense
+        assert a <= self.n_actions
+        return np.int32(a)
+
+
 class ActionTrackingStateAugmentation(StateAugmentation):
     """An agent state augmentation consisting of
     the environment observation augmented with the following dynamic information:
@@ -471,6 +526,28 @@ class ActionTrackingStateAugmentation(StateAugmentation):
         p = self.env_properties
         self.success_action_count = np.zeros(shape=(p.maximum_node_count, self.aa.n_actions), dtype=np.int32)
         self.failed_action_count = np.zeros(shape=(p.maximum_node_count, self.aa.n_actions), dtype=np.int32)
+        super().on_reset(observation)
+
+
+class DefenseActionTrackingStateAugmentation(StateAugmentation):
+    """An agent state augmentation consisting of
+    the environment observation augmented with the following dynamic information:
+       - success_action_count: count of action taken and succeeded at the current node
+       - failed_action_count: count of action taken and failed at the current node
+     """
+
+    def __init__(self, p: EnvironmentBounds, observation: cyberbattle_env.Observation):
+        self.aa = AbstractDefenseAction(p)
+        self.env_properties = p
+        super().__init__(observation)
+
+    def on_step(self, action: cyberbattle_env.DefenseAction, reward: float, done: bool, observation: cyberbattle_env.Observation):
+        node = cyberbattle_env.sourcenode_of_defense_action(action)
+        abstract_action = self.aa.abstract_from_gymaction(action)
+        super().on_step(action, reward, done, observation)
+
+    def on_reset(self, observation: cyberbattle_env.Observation):
+        p = self.env_properties
         super().on_reset(observation)
 
 
@@ -524,7 +601,25 @@ class AgentWrapper(Wrapper):
         self.state = state
 
     def step(self, action: cyberbattle_env.Action):
-        observation, reward, done, info = self.env.step(action)
+        observation, reward, done, info = self.env.step(action,'attacker')
+        self.state.on_step(action, reward, done, observation)
+        return observation, reward, done, info
+
+    def reset(self):
+        observation = self.env.reset()
+        self.state.on_reset(observation)
+        return observation
+
+
+class DefenseAgentWrapper(Wrapper):
+    """Gym wrapper to update the agent state on every step"""
+
+    def __init__(self, env: cyberbattle_env.CyPhyBattleEnv, state: StateAugmentation):
+        super().__init__(env)
+        self.state = state
+
+    def step(self, action: cyberbattle_env.DefenseAction, obs):
+        observation, reward, done, info = self.env.step(action,'defender',obs)
         self.state.on_step(action, reward, done, observation)
         return observation, reward, done, info
 
